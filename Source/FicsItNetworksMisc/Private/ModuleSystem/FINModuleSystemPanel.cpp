@@ -1,7 +1,6 @@
 #include "ModuleSystem/FINModuleSystemPanel.h"
 #include "FactoryGameCustomVersion.h"
 #include "FGDismantleInterface.h"
-#include "FortniteReleaseBranchCustomObjectVersion.h"
 #include "SaveCustomVersion.h"
 #include "GameFramework/Actor.h"
 #include "ModuleSystem/FINModuleSystemModule.h"
@@ -14,35 +13,39 @@ void UFINModuleSystemPanel::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>
 }
 
 void UFINModuleSystemPanel::Serialize(FArchive& Ar) {
-	bool bOldObj = Ar.IsSaveGame() && Ar.CustomVer(FSaveCustomVersion::GUID) < FSaveCustomVersion::ResetBrokenBlueprintSplines;
-	int Ver = 0;
-	if(bOldObj) {
-		Ver = Ar.CustomVer(FFortniteReleaseBranchCustomObjectVersion::GUID);
-		Ar.SetCustomVersion(FFortniteReleaseBranchCustomObjectVersion::GUID, 1, TEXT("FFortniteReleaseBranchCustomObjectVersion"));
+	if (Ar.IsSaveGame() && Ar.IsLoading()) {
+		if (Ar.CustomVer(FSaveCustomVersion::GUID) < FSaveCustomVersion::ResetBrokenBlueprintSplines) {
+			Ar.SetCustomVersion(FFortniteReleaseBranchCustomObjectVersion::GUID, 1, TEXT("FFortniteReleaseBranchCustomObjectVersion"));
+		} else if (
+		    Ar.CustomVer(FSaveCustomVersion::GUID) < FSaveCustomVersion::FixNewPlayerInfoHandleSerializationFormat
+		 && Ar.CustomVer(FFortniteReleaseBranchCustomObjectVersion::GUID) < FFortniteReleaseBranchCustomObjectVersion::ActorComponentUCSModifiedPropertiesSparseStorage
+		) {
+			Ar.SetCustomVersion(FFortniteReleaseBranchCustomObjectVersion::GUID, FFortniteReleaseBranchCustomObjectVersion::ActorComponentUCSModifiedPropertiesSparseStorage, TEXT("FFortniteReleaseBranchCustomObjectVersion"));
+		}
 	}
 
 	Super::Serialize(Ar);
 	
 	if (Ar.IsSaveGame()) {
-		if(bOldObj) {
-			Ar.SetCustomVersion(FFortniteReleaseBranchCustomObjectVersion::GUID, Ver, TEXT("FFortniteReleaseBranchCustomObjectVersion"));
-		}
+		int saveHeight = PanelHeight, saveWidth = PanelWidth;
+		Ar << saveHeight;
+		Ar << saveWidth;
+		
+		int finalHeight = bPrioritizeDefaults ? PanelHeight : saveHeight;
+		int finalWidth = bPrioritizeDefaults ? PanelWidth : saveWidth;
+		PanelHeight = finalHeight;
+		PanelWidth = finalWidth;
 		
 		SetupGrid();
-
-		int height = PanelHeight, width = PanelWidth;
-		Ar << PanelHeight;
-		Ar << PanelWidth;
-
-		for (int x = 0; x < PanelHeight; ++x) {
-			for (int y = 0; y < PanelWidth; ++y) {
-				if (x < height && y < width) {
-					UObject* ptr = GetGridSlot(x, y);
-					Ar << ptr;
-					GetGridSlot(x, y) = ptr;
+		
+		for (int x = 0; x < saveHeight; ++x) {
+			for (int y = 0; y < saveWidth; ++y) {
+				if (x < finalHeight && y < finalWidth) {
+					Ar << GetGridSlot(x, y);
 				} else {
-					UObject* ptr = nullptr;
-					Ar << ptr;
+					// Serialized Panel is larger than actual panel, skipping out of bounds
+					UObject* dummy = nullptr;
+					Ar << dummy;
 				}
 			}
 		}
@@ -171,4 +174,15 @@ void UFINModuleSystemPanel::GetModuleSpace(const FVector& Loc, const int Rot, co
 	default:
 		break;
 	}
+}
+
+/**
+ * ONLY CALL IN INITIATION!
+ * 
+ * @param Width  
+ * @param Height 
+ */
+void UFINModuleSystemPanel::SetPanelSize(int Width, int Height) {
+	PanelWidth = Width;
+	PanelHeight = Height;
 }
